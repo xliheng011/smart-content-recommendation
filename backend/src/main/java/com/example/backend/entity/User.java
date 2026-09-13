@@ -34,6 +34,9 @@ public class User {
     private LocalDateTime updatedAt;
 
     public User() {
+        LocalDateTime now = LocalDateTime.now();
+        this.createdAt = now;
+        this.updatedAt = now;
     }
 
     public Long getId() {
