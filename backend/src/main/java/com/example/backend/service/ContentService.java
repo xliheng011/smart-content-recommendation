@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class ContentService {
@@ -46,19 +47,29 @@ public class ContentService {
                 savedContent.getLikeCount()
         );
     }
+    @Transactional
     public ContentResponse getContentById(Long id) {
 
+        // 1. 查询内容是否存在
         Content content = contentRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("内容不存在"));
 
+        // 2. 使用数据库原子操作增加浏览量
+        contentRepository.incrementViewCount(id);
+
+        // 3. 重新查询，拿到最新的浏览量
+        Content updatedContent = contentRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("内容不存在"));
+
+        // 4. 返回最新内容
         return new ContentResponse(
-                content.getId(),
-                content.getTitle(),
-                content.getContent(),
-                content.getCategory(),
-                content.getAuthorId(),
-                content.getViewCount(),
-                content.getLikeCount()
+                updatedContent.getId(),
+                updatedContent.getTitle(),
+                updatedContent.getContent(),
+                updatedContent.getCategory(),
+                updatedContent.getAuthorId(),
+                updatedContent.getViewCount(),
+                updatedContent.getLikeCount()
         );
     }
     public List<ContentResponse> getAllContents() {
@@ -75,5 +86,28 @@ public class ContentService {
                         content.getLikeCount()
                 ))
                 .toList();
+    }
+
+    @Transactional
+    public ContentResponse likeContent(Long id) {
+
+        int updatedRows = contentRepository.incrementLikeCount(id);
+
+        if (updatedRows == 0) {
+            throw new RuntimeException("内容不存在");
+        }
+
+        Content content = contentRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("内容不存在"));
+
+        return new ContentResponse(
+                content.getId(),
+                content.getTitle(),
+                content.getContent(),
+                content.getCategory(),
+                content.getAuthorId(),
+                content.getViewCount(),
+                content.getLikeCount()
+        );
     }
 }

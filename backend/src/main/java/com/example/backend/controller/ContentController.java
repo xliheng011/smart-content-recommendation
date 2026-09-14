@@ -33,4 +33,9 @@ public class ContentController {
     public List<ContentResponse> getAllContents() {
         return contentService.getAllContents();
     }
+
+    @PostMapping("/{id}/like")
+    public ContentResponse likeContent(@PathVariable Long id) {
+        return contentService.likeContent(id);
+    }
 }
