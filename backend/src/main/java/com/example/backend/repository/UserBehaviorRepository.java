@@ -9,11 +9,4 @@ public interface UserBehaviorRepository
         extends JpaRepository<UserBehavior, Long> {
 
     List<UserBehavior> findByUserId(Long userId);
-
-    List<UserBehavior> findByContentId(Long contentId);
-
-    List<UserBehavior> findByUserIdAndBehaviorType(
-            Long userId,
-            String behaviorType
-    );
 }
