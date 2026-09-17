@@ -1,74 +1,147 @@
 package com.example.backend.service;
 
-import com.example.backend.entity.Recommendation;
+
+import com.example.backend.dto.RecommendationResponse;
+import com.example.backend.entity.Content;
 import com.example.backend.entity.UserBehavior;
-import com.example.backend.repository.RecommendationRepository;
+import com.example.backend.repository.ContentRepository;
 import com.example.backend.repository.UserBehaviorRepository;
 import org.springframework.stereotype.Service;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+
+import java.util.*;
+import java.util.stream.Collectors;
+
+
 
 @Service
 public class RecommendationService {
 
-    private final RecommendationRepository recommendationRepository;
+
     private final UserBehaviorRepository userBehaviorRepository;
 
+    private final ContentRepository contentRepository;
+
+
+
     public RecommendationService(
-            RecommendationRepository recommendationRepository,
-            UserBehaviorRepository userBehaviorRepository) {
+            UserBehaviorRepository userBehaviorRepository,
+            ContentRepository contentRepository
+    ){
 
-        this.recommendationRepository = recommendationRepository;
-        this.userBehaviorRepository = userBehaviorRepository;
+        this.userBehaviorRepository =
+                userBehaviorRepository;
+
+        this.contentRepository =
+                contentRepository;
+
     }
 
-    public List<Recommendation> getRecommendations(Long userId) {
 
-        return recommendationRepository
-                .findByUserIdOrderByScoreDesc(userId);
-    }
 
-    public void generateRecommendations(Long userId) {
+
+
+    public List<RecommendationResponse> recommend(
+            Long userId
+    ){
+
+
+        // 查询用户行为
 
         List<UserBehavior> behaviors =
-                userBehaviorRepository.findByUserId(userId);
+                userBehaviorRepository
+                        .findByUserId(userId);
 
-        Map<Long, Double> contentScores = new HashMap<>();
 
-        for (UserBehavior behavior : behaviors) {
 
-            Long contentId = behavior.getContentId();
+        Map<String,Integer> categoryScore =
+                new HashMap<>();
 
-            double score = 0;
 
-            if ("VIEW".equals(behavior.getBehaviorType())) {
-                score = 1;
-            } else if ("LIKE".equals(behavior.getBehaviorType())) {
-                score = 3;
+
+        for(UserBehavior behavior: behaviors){
+
+
+            Content content =
+                    contentRepository
+                            .findById(
+                                    behavior.getContentId()
+                            )
+                            .orElse(null);
+
+
+
+            if(content==null){
+                continue;
             }
 
-            contentScores.merge(
-                    contentId,
+
+
+            int score =
+                    behavior.getBehaviorType()
+                            .equals("LIKE")
+                            ?3
+                            :1;
+
+
+
+            categoryScore.merge(
+                    content.getCategory(),
                     score,
-                    Double::sum
+                    Integer::sum
             );
+
         }
 
-        for (Map.Entry<Long, Double> entry : contentScores.entrySet()) {
 
-            Recommendation recommendation =
-                    recommendationRepository
-                            .findByUserIdAndContentId(userId, entry.getKey())
-                            .orElseGet(Recommendation::new);
 
-            recommendation.setUserId(userId);
-            recommendation.setContentId(entry.getKey());
-            recommendation.setScore(entry.getValue());
-            recommendation.setReason("根据用户行为推荐");
 
-            recommendationRepository.save(recommendation);
-        }
+
+
+        // 查询所有内容
+
+        List<Content> contents =
+                contentRepository.findAll();
+
+
+
+
+        return contents.stream()
+
+                .map(content -> {
+
+
+                    int score =
+                            categoryScore
+                                    .getOrDefault(
+                                            content.getCategory(),
+                                            0
+                                    );
+
+
+                    return new RecommendationResponse(
+                            content.getId(),
+                            content.getTitle(),
+                            content.getCategory(),
+                            score
+                    );
+
+                })
+
+
+                .sorted(
+                        Comparator.comparing(
+                                        RecommendationResponse::getScore
+                                )
+                                .reversed()
+                )
+
+                .limit(10)
+
+                .collect(Collectors.toList());
+
+
     }
+
+
 }
