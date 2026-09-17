@@ -1,0 +1,59 @@
+[33mcommit da6eddea583200144c19ac5f4591ff8da442a6ad[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m
+Author: xliheng011 <xliheng@gmail.com>
+Date:   Thu Sep 17 17:59:27 2026 +0800
+
+    feat: add redis cache for recommendation
+
+[33mcommit 2e738142a66b8d06d2919a0b8006de7f04fffbfc[m
+Author: xliheng011 <xliheng@gmail.com>
+Date:   Thu Sep 17 17:44:34 2026 +0800
+
+    feat: add user behavior based recommendation
+
+[33mcommit 9afe0f1809eba73afdf0ed628fb8c6fe8a8dfc18[m
+Author: xliheng011 <xliheng@gmail.com>
+Date:   Thu Sep 17 12:54:12 2026 +0800
+
+    feat: integrate redis with spring boot
+
+[33mcommit a1cbde59148dfbde08746a1cd05821d6da5eb88b[m
+Author: xliheng011 <xliheng@gmail.com>
+Date:   Tue Sep 15 21:30:37 2026 +0800
+
+    feat: add basic recommendation system
+
+[33mcommit 1b3b735b8f5be630a921272ed739edc61c785168[m
+Author: xliheng011 <xliheng@gmail.com>
+Date:   Tue Sep 15 00:28:28 2026 +0800
+
+    feat: add user behavior tracking
+
+[33mcommit b3916000e0ce8bda03d7f107ed8dcc52623d44a8[m
+Author: xliheng011 <xliheng@gmail.com>
+Date:   Mon Sep 14 20:56:23 2026 +0800
+
+    feat: add content view and like concurrency handling
+
+[33mcommit 09f201221ca1caeaea3739fd3efaf9cb5ebc50ab[m
+Author: xliheng011 <xliheng@gmail.com>
+Date:   Mon Sep 14 12:16:04 2026 +0800
+
+    feat: add content management
+
+[33mcommit 4d03c3e38afe2426be448bfe5d18abdea7dceb09[m
+Author: xliheng011 <xliheng@gmail.com>
+Date:   Sun Sep 13 22:23:52 2026 +0800
+
+    feat: add user management and login
+
+[33mcommit cebf8c154ff6b8164c5cd54793397fabdd090f10[m
+Author: xliheng011 <xliheng@gmail.com>
+Date:   Sat Sep 12 23:03:53 2026 +0800
+
+    feat: add user repository and mysql integration
+
+[33mcommit 68cb4f83af4aed851e83e72933e09d4d7a52416a[m
+Author: xliheng011 <xliheng@gmail.com>
+Date:   Sat Sep 12 20:02:56 2026 +0800
+
+    feat: initialize spring boot backend

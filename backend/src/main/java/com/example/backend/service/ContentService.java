@@ -228,6 +228,17 @@ public class ContentService {
 
         }
 
+        if(userId != null){
+
+            redisTemplate.delete(
+                    "recommend:user:" + userId
+            );
+
+            System.out.println(
+                    "删除推荐缓存: recommend:user:" + userId
+            );
+        }
+
 
         String cacheKey =
                 "content:" + id;
