@@ -6,8 +6,10 @@ import com.example.backend.entity.Content;
 import com.example.backend.entity.UserBehavior;
 import com.example.backend.repository.ContentRepository;
 import com.example.backend.repository.UserBehaviorRepository;
+import com.example.backend.dto.HotRecommendationResponse;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
+
 
 import java.time.Duration;
 import java.util.*;
@@ -240,6 +242,117 @@ public class RecommendationService {
 
         System.out.println(
                 "推荐缓存写入: "
+                        + cacheKey
+        );
+
+
+
+        return result;
+
+    }
+
+    public List<HotRecommendationResponse> hotRecommend(){
+
+
+        String cacheKey =
+                "recommend:hot";
+
+
+
+        Object cache =
+                redisTemplate.opsForValue()
+                        .get(cacheKey);
+
+
+
+        if(cache != null){
+
+            System.out.println(
+                    "热门推荐缓存命中: "
+                            + cacheKey
+            );
+
+
+            return (List<HotRecommendationResponse>) cache;
+
+        }
+
+
+
+        System.out.println(
+                "热门推荐缓存未命中: "
+                        + cacheKey
+        );
+
+
+
+
+        List<Content> contents =
+                contentRepository.findAll();
+
+
+
+
+        List<HotRecommendationResponse> result =
+                contents.stream()
+
+                        .map(content -> {
+
+
+                            int score =
+                                    content.getLikeCount() * 3
+                                            +
+                                            content.getViewCount();
+
+
+
+                            return new HotRecommendationResponse(
+
+                                    content.getId(),
+
+                                    content.getTitle(),
+
+                                    content.getCategory(),
+
+                                    score
+
+                            );
+
+
+                        })
+
+
+                        .sorted(
+
+                                Comparator
+                                        .comparing(
+                                                HotRecommendationResponse::getScore
+                                        )
+                                        .reversed()
+
+                        )
+
+
+                        .limit(10)
+
+
+                        .collect(Collectors.toList());
+
+
+
+
+
+        redisTemplate.opsForValue()
+                .set(
+                        cacheKey,
+                        result,
+                        Duration.ofMinutes(10)
+                );
+
+
+
+        System.out.println(
+                "热门推荐缓存写入: "
                         + cacheKey
         );
 

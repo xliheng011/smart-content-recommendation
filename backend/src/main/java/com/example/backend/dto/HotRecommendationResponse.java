@@ -1,7 +1,7 @@
 package com.example.backend.dto;
 
 
-public class RecommendationResponse {
+public class HotRecommendationResponse {
 
 
     private Long id;
@@ -14,12 +14,12 @@ public class RecommendationResponse {
 
 
 
-    public RecommendationResponse(
+    public HotRecommendationResponse(
             Long id,
             String title,
             String category,
             Integer score
-    ) {
+    ){
 
         this.id = id;
         this.title = title;
@@ -27,7 +27,6 @@ public class RecommendationResponse {
         this.score = score;
 
     }
-
 
 
 
@@ -50,7 +49,4 @@ public class RecommendationResponse {
         return score;
     }
 
-
-
 }
-

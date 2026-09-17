@@ -1,6 +1,7 @@
 package com.example.backend.controller;
 
 
+import com.example.backend.dto.HotRecommendationResponse;
 import com.example.backend.dto.RecommendationResponse;
 import com.example.backend.service.RecommendationService;
 import org.springframework.web.bind.annotation.*;
@@ -39,6 +40,13 @@ public class RecommendationController {
 
         return recommendationService
                 .recommend(userId);
+
+    }
+
+    @GetMapping("/hot")
+    public List<HotRecommendationResponse> hot(){
+
+        return recommendationService.hotRecommend();
 
     }
 
