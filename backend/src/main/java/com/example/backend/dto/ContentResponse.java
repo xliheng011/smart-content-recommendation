@@ -1,34 +1,43 @@
 package com.example.backend.dto;
 
+/**
+ * 内容对外结构。
+ */
 public class ContentResponse {
 
     private Long id;
+
     private String title;
+
     private String content;
+
+    /** 列表页用的摘要 */
+    private String preview;
+
     private String category;
+
     private Long authorId;
+
+    private String authorName;
+
     private Integer viewCount;
+
     private Integer likeCount;
 
+    /** 当前请求用户是否已点赞 */
+    private Boolean liked;
+
+    private String createdAt;
+
+    private String updatedAt;
+
+    /**
+     * 当前用户最近一次阅读该内容的时间。
+     * 仅"阅读历史"接口会填充，其余场景为 null。
+     */
+    private String viewedAt;
+
     public ContentResponse() {
-    }
-
-    public ContentResponse(
-            Long id,
-            String title,
-            String content,
-            String category,
-            Long authorId,
-            Integer viewCount,
-            Integer likeCount) {
-
-        this.id = id;
-        this.title = title;
-        this.content = content;
-        this.category = category;
-        this.authorId = authorId;
-        this.viewCount = viewCount;
-        this.likeCount = likeCount;
     }
 
     public Long getId() {
@@ -55,6 +64,14 @@ public class ContentResponse {
         this.content = content;
     }
 
+    public String getPreview() {
+        return preview;
+    }
+
+    public void setPreview(String preview) {
+        this.preview = preview;
+    }
+
     public String getCategory() {
         return category;
     }
@@ -71,6 +88,14 @@ public class ContentResponse {
         this.authorId = authorId;
     }
 
+    public String getAuthorName() {
+        return authorName;
+    }
+
+    public void setAuthorName(String authorName) {
+        this.authorName = authorName;
+    }
+
     public Integer getViewCount() {
         return viewCount;
     }
@@ -85,5 +110,37 @@ public class ContentResponse {
 
     public void setLikeCount(Integer likeCount) {
         this.likeCount = likeCount;
+    }
+
+    public Boolean getLiked() {
+        return liked;
+    }
+
+    public void setLiked(Boolean liked) {
+        this.liked = liked;
+    }
+
+    public String getCreatedAt() {
+        return createdAt;
+    }
+
+    public void setCreatedAt(String createdAt) {
+        this.createdAt = createdAt;
+    }
+
+    public String getUpdatedAt() {
+        return updatedAt;
+    }
+
+    public void setUpdatedAt(String updatedAt) {
+        this.updatedAt = updatedAt;
+    }
+
+    public String getViewedAt() {
+        return viewedAt;
+    }
+
+    public void setViewedAt(String viewedAt) {
+        this.viewedAt = viewedAt;
     }
 }

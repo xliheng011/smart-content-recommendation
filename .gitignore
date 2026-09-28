@@ -1,0 +1,32 @@
+# ---------- 系统 / 编辑器 ----------
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# ---------- AI 助手工作目录 ----------
+# 存放会话记忆、验证脚本与截图。其中 demo-auth.json 含登录令牌，
+# 属于本机工作产物，不纳入版本库。
+# 若需要保留验证脚本，请把它们挪到仓库内的 scripts/ 目录再提交。
+.workbuddy-ai/
+
+# ---------- 构建产物（各子模块另有自己的 .gitignore，这里兜底）----------
+node_modules/
+dist/
+dist-ssr/
+target/
+build/
+
+# ---------- 日志 ----------
+logs/
+*.log
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---------- 本地环境覆盖 ----------
+*.local
+.env
+.env.local

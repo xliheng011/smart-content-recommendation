@@ -1,120 +1,168 @@
 package com.example.backend.service;
 
+import com.example.backend.common.ApiException;
 import com.example.backend.dto.LoginRequest;
+import com.example.backend.dto.LoginResponse;
+import com.example.backend.dto.RegisterRequest;
 import com.example.backend.dto.UserResponse;
 import com.example.backend.entity.User;
 import com.example.backend.repository.UserRepository;
-
-import org.springframework.http.HttpStatus;
+import com.example.backend.security.AuthUser;
+import com.example.backend.security.TokenService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
-import org.springframework.web.server.ResponseStatusException;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
 
 @Service
 public class AuthService {
 
     private final UserRepository userRepository;
+
     private final PasswordEncoder passwordEncoder;
+
+    private final TokenService tokenService;
 
     public AuthService(
             UserRepository userRepository,
-            PasswordEncoder passwordEncoder
+            PasswordEncoder passwordEncoder,
+            TokenService tokenService
     ) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
+        this.tokenService = tokenService;
     }
 
-    /**
-     * 用户 / 管理员登录
-     *
-     * USER  -> 普通用户
-     * ADMIN -> 管理员
-     */
-    public UserResponse login(LoginRequest request) {
+    /* ============================
+       注册
+    ============================ */
 
-        /*
-         * 基础参数检查
-         */
-        if (request.getUsername() == null
-                || request.getUsername().isBlank()
-                || request.getPassword() == null
-                || request.getPassword().isBlank()) {
+    @Transactional
+    public LoginResponse register(RegisterRequest request) {
 
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST,
-                    "用户名和密码不能为空"
-            );
+        String username = request.getUsername().trim();
+
+        if (userRepository.existsByUsername(username)) {
+            throw ApiException.conflict("该用户名已被注册");
         }
 
-        /*
-         * 如果没有传 role，默认按照普通用户登录
-         */
+        String email = normalizeEmail(request.getEmail());
+
+        if (email != null && userRepository.existsByEmail(email)) {
+            throw ApiException.conflict("该邮箱已被注册");
+        }
+
+        User user = new User();
+
+        user.setUsername(username);
+        user.setPassword(passwordEncoder.encode(request.getPassword()));
+        user.setEmail(email);
+        user.setNickname(resolveNickname(request.getNickname(), username));
+        user.setRole("USER");
+
+        LocalDateTime now = LocalDateTime.now();
+
+        user.setCreatedAt(now);
+        user.setUpdatedAt(now);
+
+        User saved = userRepository.save(user);
+
+        return buildLoginResponse(saved);
+    }
+
+    /* ============================
+       登录
+    ============================ */
+
+    @Transactional(readOnly = true)
+    public LoginResponse login(LoginRequest request) {
+
+        String username = request.getUsername().trim();
+
         String loginRole = request.getRole();
 
         if (loginRole == null || loginRole.isBlank()) {
             loginRole = "USER";
         }
 
-        loginRole = loginRole.toUpperCase();
+        loginRole = loginRole.trim().toUpperCase();
 
-        /*
-         * 只允许 USER / ADMIN
-         */
-        if (!"USER".equals(loginRole)
-                && !"ADMIN".equals(loginRole)) {
-
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST,
-                    "无效的登录角色"
-            );
+        if (!"USER".equals(loginRole) && !"ADMIN".equals(loginRole)) {
+            throw ApiException.badRequest("无效的登录角色");
         }
 
-        /*
-         * 根据用户名查询用户
-         */
-        User user = userRepository
-                .findByUsername(request.getUsername())
+        User user = userRepository.findByUsername(username)
                 .orElseThrow(() ->
-                        new ResponseStatusException(
-                                HttpStatus.UNAUTHORIZED,
-                                "用户名或密码错误"
-                        )
+                        ApiException.unauthorized("用户名或密码错误")
                 );
 
-        /*
-         * 检查密码
-         */
         if (!passwordEncoder.matches(
                 request.getPassword(),
                 user.getPassword()
         )) {
-
-            throw new ResponseStatusException(
-                    HttpStatus.UNAUTHORIZED,
-                    "用户名或密码错误"
-            );
+            throw ApiException.unauthorized("用户名或密码错误");
         }
 
         /*
-         * 检查数据库中的真实角色
-         *
-         * 这里非常重要：
-         *
-         * 前端即使发送 ADMIN，
-         * 但数据库里这个用户是 USER，
-         * 也不能以管理员身份登录。
+         * 关键安全点：即使前端声明以 ADMIN 登录，
+         * 只要数据库里该账号是 USER，就拒绝。
          */
         if (!loginRole.equalsIgnoreCase(user.getRole())) {
-
-            throw new ResponseStatusException(
-                    HttpStatus.FORBIDDEN,
-                    "当前账号没有该登录权限"
-            );
+            throw ApiException.forbidden("当前账号没有该登录权限");
         }
 
-        /*
-         * 登录成功
-         */
+        return buildLoginResponse(user);
+    }
+
+    /* ============================
+       注销
+    ============================ */
+
+    public void logout(String token) {
+        tokenService.revoke(token);
+    }
+
+    /* ============================
+       当前用户
+    ============================ */
+
+    @Transactional(readOnly = true)
+    public UserResponse currentUser(AuthUser authUser) {
+
+        if (authUser == null) {
+            throw ApiException.unauthorized("尚未登录");
+        }
+
+        User user = userRepository.findById(authUser.userId())
+                .orElseThrow(() -> ApiException.unauthorized("登录状态已失效"));
+
+        return toResponse(user);
+    }
+
+    /* ============================
+       工具
+    ============================ */
+
+    private LoginResponse buildLoginResponse(User user) {
+
+        AuthUser authUser = new AuthUser(
+                user.getId(),
+                user.getUsername(),
+                user.getRole()
+        );
+
+        String token = tokenService.issue(authUser);
+
+        return new LoginResponse(
+                token,
+                TokenService.TOKEN_TTL.toSeconds(),
+                toResponse(user)
+        );
+    }
+
+    private UserResponse toResponse(User user) {
+
         return new UserResponse(
                 user.getId(),
                 user.getUsername(),
@@ -123,5 +171,23 @@ public class AuthService {
                 user.getAvatarUrl(),
                 user.getRole()
         );
+    }
+
+    private String normalizeEmail(String email) {
+
+        if (email == null || email.isBlank()) {
+            return null;
+        }
+
+        return email.trim();
+    }
+
+    private String resolveNickname(String nickname, String username) {
+
+        if (nickname == null || nickname.isBlank()) {
+            return username;
+        }
+
+        return nickname.trim();
     }
 }

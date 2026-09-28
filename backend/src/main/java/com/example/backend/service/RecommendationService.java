@@ -6,227 +6,347 @@ import com.example.backend.entity.Content;
 import com.example.backend.entity.UserBehavior;
 import com.example.backend.repository.ContentRepository;
 import com.example.backend.repository.UserBehaviorRepository;
-
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.core.type.TypeReference;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
+import java.util.Optional;
+import java.util.Set;
 
+/**
+ * 推荐服务。
+ *
+ * 个性化推荐打分公式：
+ *
+ *   score = 兴趣权重 * 20          （用户对内容分类的历史偏好）
+ *         + min(热度, 500)         （点赞 * 3 + 浏览，做上限截断防止爆款垄断）
+ *         + 新鲜度 * 2             （30 天内线性衰减）
+ *         - 已读惩罚               （读过 8 分，避免反复推荐同一篇）
+ *
+ * 已经点赞过的内容不再出现在推荐流里，因为它们已经沉淀到"我的喜欢"。
+ */
 @Service
 public class RecommendationService {
 
+    private static final Duration USER_CACHE_TTL = Duration.ofMinutes(10);
+
+    private static final Duration HOT_CACHE_TTL = Duration.ofMinutes(5);
+
+    private static final int RECOMMEND_LIMIT = 12;
+
+    private static final int HOT_LIMIT = 10;
+
+    /** 兴趣权重上限，避免单一分类彻底垄断推荐流 */
+    private static final int AFFINITY_CAP = 30;
+
+    private static final int HOT_CAP = 500;
+
+    private static final int FRESHNESS_DAYS = 30;
+
     private final UserBehaviorRepository userBehaviorRepository;
+
     private final ContentRepository contentRepository;
-    private final RedisTemplate<String, Object> redisTemplate;
+
+    private final ContentMapper contentMapper;
+
+    private final CacheService cacheService;
 
     public RecommendationService(
             UserBehaviorRepository userBehaviorRepository,
             ContentRepository contentRepository,
-            RedisTemplate<String, Object> redisTemplate
+            ContentMapper contentMapper,
+            CacheService cacheService
     ) {
         this.userBehaviorRepository = userBehaviorRepository;
         this.contentRepository = contentRepository;
-        this.redisTemplate = redisTemplate;
+        this.contentMapper = contentMapper;
+        this.cacheService = cacheService;
     }
 
-    /**
-     * 个性化推荐
-     *
-     * GET /api/recommend/{userId}
-     */
+    /* ============================
+       个性化推荐
+    ============================ */
+
+    @Transactional(readOnly = true)
     public List<RecommendationResponse> recommend(Long userId) {
 
         String cacheKey = "recommend:user:" + userId;
 
-        Object cache = redisTemplate
-                .opsForValue()
-                .get(cacheKey);
-
-        if (cache instanceof List<?> list) {
-
-            System.out.println(
-                    "推荐缓存命中: " + cacheKey
-            );
-
-            return (List<RecommendationResponse>) list;
-        }
-
-        System.out.println(
-                "推荐缓存未命中: " + cacheKey
+        Optional<List<RecommendationResponse>> cached = cacheService.get(
+                cacheKey,
+                new TypeReference<List<RecommendationResponse>>() {
+                }
         );
 
-        /*
-         * 读取用户行为
-         */
+        if (cached.isPresent()) {
+            return cached.get();
+        }
+
         List<UserBehavior> behaviors =
                 userBehaviorRepository.findByUserId(userId);
 
-        /*
-         * 计算用户对不同分类的兴趣分数
-         *
-         * VIEW = 1 分
-         * LIKE = 3 分
-         */
-        Map<String, Integer> categoryScore =
-                new HashMap<>();
+        List<Content> allContents = contentRepository.findAll();
+
+        Map<Long, Content> contentIndex = new HashMap<>();
+
+        allContents.forEach(content ->
+                contentIndex.put(content.getId(), content)
+        );
+
+        /* 1. 统计分类兴趣分：点赞 3 分，浏览 1 分 */
+        Map<String, Integer> categoryScore = new HashMap<>();
+
+        Set<Long> likedContentIds = new HashSet<>();
+
+        Set<Long> viewedContentIds = new HashSet<>();
 
         for (UserBehavior behavior : behaviors) {
 
-            Content content =
-                    contentRepository
-                            .findById(behavior.getContentId())
-                            .orElse(null);
+            Content content = contentIndex.get(behavior.getContentId());
 
             if (content == null) {
                 continue;
             }
 
+            if (ContentMapper.BEHAVIOR_LIKE.equals(behavior.getBehaviorType())) {
+                likedContentIds.add(behavior.getContentId());
+            } else {
+                viewedContentIds.add(behavior.getContentId());
+            }
+
             String category = content.getCategory();
 
-            if (category == null) {
+            if (category == null || category.isBlank()) {
                 continue;
             }
 
-            int score =
-                    "LIKE".equals(behavior.getBehaviorType())
-                            ? 3
-                            : 1;
+            int weight = ContentMapper.BEHAVIOR_LIKE
+                    .equals(behavior.getBehaviorType()) ? 3 : 1;
 
-            categoryScore.merge(
-                    category,
-                    score,
-                    Integer::sum
-            );
+            categoryScore.merge(category, weight, Integer::sum);
         }
 
-        /*
-         * 生成推荐列表
-         */
-        List<RecommendationResponse> result =
-                contentRepository.findAll()
-                        .stream()
-                        .map(content -> {
+        boolean coldStart = categoryScore.isEmpty();
 
-                            int score =
-                                    categoryScore.getOrDefault(
-                                            content.getCategory(),
-                                            0
-                                    );
+        /* 2. 计算每个内容的得分 */
+        List<RecommendationResponse> result = new ArrayList<>();
 
-                            /*
-                             * 这里使用新的 7 参数构造函数
-                             *
-                             * id
-                             * title
-                             * category
-                             * score
-                             * content
-                             * viewCount
-                             * likeCount
-                             */
-                            return new RecommendationResponse(
-                                    content.getId(),
-                                    content.getTitle(),
-                                    content.getCategory(),
-                                    score,
-                                    content.getContent(),
-                                    content.getViewCount(),
-                                    content.getLikeCount()
-                            );
-                        })
-                        .sorted(
-                                Comparator.comparing(
-                                        RecommendationResponse::getScore
-                                ).reversed()
-                        )
-                        .limit(10)
-                        .collect(Collectors.toList());
+        for (Content content : allContents) {
 
-        /*
-         * 写入 Redis
-         */
-        redisTemplate
-                .opsForValue()
-                .set(cacheKey, result);
+            // 已点赞的内容不再推荐
+            if (likedContentIds.contains(content.getId())) {
+                continue;
+            }
 
-        System.out.println(
-                "推荐缓存写入: " + cacheKey
+            int affinity = Math.min(
+                    categoryScore.getOrDefault(content.getCategory(), 0),
+                    AFFINITY_CAP
+            );
+
+            int hotness = Math.min(hotScore(content), HOT_CAP);
+
+            long freshness = freshnessBonus(content.getCreatedAt());
+
+            int readPenalty = viewedContentIds.contains(content.getId())
+                    ? 8
+                    : 0;
+
+            int score = affinity * 20
+                    + hotness
+                    + (int) freshness * 2
+                    - readPenalty;
+
+            RecommendationResponse response = new RecommendationResponse();
+
+            response.setId(content.getId());
+            response.setTitle(content.getTitle());
+            response.setCategory(content.getCategory());
+            response.setScore(score);
+            response.setContent(content.getContent());
+            response.setPreview(ContentMapper.preview(content.getContent()));
+            response.setViewCount(nullSafe(content.getViewCount()));
+            response.setLikeCount(nullSafe(content.getLikeCount()));
+            response.setLiked(false);
+            response.setAuthorId(content.getAuthorId());
+            response.setCreatedAt(ContentMapper.format(content.getCreatedAt()));
+            response.setReason(buildReason(
+                    affinity,
+                    hotness,
+                    content.getCategory(),
+                    coldStart
+            ));
+
+            result.add(response);
+        }
+
+        result.sort(
+                Comparator.comparing(RecommendationResponse::getScore)
+                        .reversed()
         );
 
-        return result;
+        List<RecommendationResponse> limited = result.stream()
+                .limit(RECOMMEND_LIMIT)
+                .toList();
+
+        contentMapper.fillAuthorNamesForRecommendations(limited);
+
+        cacheService.set(cacheKey, limited, USER_CACHE_TTL);
+
+        return limited;
     }
 
-    /**
-     * 热门推荐
-     *
-     * GET /api/recommend/hot
-     */
-    public List<HotRecommendationResponse> hotRecommend() {
+    /* ============================
+       热门榜
+    ============================ */
+
+    @Transactional(readOnly = true)
+    public List<HotRecommendationResponse> hotRecommend(Long userId) {
 
         String cacheKey = "recommend:hot";
 
-        Object cache =
-                redisTemplate
-                        .opsForValue()
-                        .get(cacheKey);
+        List<HotRecommendationResponse> ranking;
 
-        if (cache instanceof List<?> list) {
+        Optional<List<HotRecommendationResponse>> cached = cacheService.get(
+                cacheKey,
+                new TypeReference<List<HotRecommendationResponse>>() {
+                }
+        );
 
-            System.out.println(
-                    "热门推荐缓存命中"
-            );
+        if (cached.isPresent()) {
+            ranking = cached.get();
+        } else {
 
-            return (List<HotRecommendationResponse>) list;
+            List<Content> sorted = contentRepository.findAll()
+                    .stream()
+                    .sorted(
+                            Comparator.comparingInt(
+                                    RecommendationService::hotScore
+                            ).reversed()
+                    )
+                    .limit(HOT_LIMIT)
+                    .toList();
+
+            List<HotRecommendationResponse> built = new ArrayList<>();
+
+            int rank = 1;
+
+            for (Content content : sorted) {
+
+                HotRecommendationResponse item =
+                        new HotRecommendationResponse();
+
+                item.setId(content.getId());
+                item.setTitle(content.getTitle());
+                item.setCategory(content.getCategory());
+                item.setScore(hotScore(content));
+                item.setContent(content.getContent());
+                item.setPreview(ContentMapper.preview(content.getContent()));
+                item.setViewCount(nullSafe(content.getViewCount()));
+                item.setLikeCount(nullSafe(content.getLikeCount()));
+                item.setLiked(false);
+                item.setAuthorId(content.getAuthorId());
+                item.setCreatedAt(ContentMapper.format(content.getCreatedAt()));
+                item.setRank(rank++);
+
+                built.add(item);
+            }
+
+            contentMapper.fillAuthorNamesForHot(built);
+
+            ranking = built;
+
+            cacheService.set(cacheKey, ranking, HOT_CACHE_TTL);
         }
 
-        System.out.println(
-                "热门推荐缓存未命中"
+        // liked 是随用户变化的，缓存只存榜单本身
+        if (userId != null && !ranking.isEmpty()) {
+
+            Set<Long> likedIds = contentMapper.likedContentIds(
+                    userId,
+                    ranking.stream().map(HotRecommendationResponse::getId).toList()
+            );
+
+            ranking.forEach(item ->
+                    item.setLiked(likedIds.contains(item.getId()))
+            );
+        }
+
+        return ranking;
+    }
+
+    /* ============================
+       工具方法
+    ============================ */
+
+    /**
+     * 热度分：点赞权重更高，浏览做辅助。
+     */
+    private static int hotScore(Content content) {
+
+        int likes = nullSafe(content.getLikeCount());
+
+        int views = nullSafe(content.getViewCount());
+
+        return likes * 3 + views;
+    }
+
+    /**
+     * 新鲜度：FRESHNESS_DAYS 天内线性衰减，越新分越高。
+     */
+    private static long freshnessBonus(LocalDateTime createdAt) {
+
+        if (createdAt == null) {
+            return 0;
+        }
+
+        long days = ChronoUnit.DAYS.between(
+                createdAt,
+                LocalDateTime.now()
         );
 
-        /*
-         * 热门分数：
-         *
-         * 浏览量 + 点赞量
-         */
-        List<HotRecommendationResponse> result =
-                contentRepository.findAll()
-                        .stream()
-                        .map(content -> {
+        if (days < 0) {
+            days = 0;
+        }
 
-                            int hotScore =
-                                    content.getLikeCount()
-                                            + content.getViewCount();
+        if (days >= FRESHNESS_DAYS) {
+            return 0;
+        }
 
-                            return new HotRecommendationResponse(
-                                    content.getId(),
-                                    content.getTitle(),
-                                    content.getCategory(),
-                                    hotScore
-                            );
-                        })
-                        .sorted(
-                                Comparator.comparing(
-                                        HotRecommendationResponse::getScore
-                                ).reversed()
-                        )
-                        .limit(10)
-                        .collect(Collectors.toList());
+        return FRESHNESS_DAYS - days;
+    }
 
-        /*
-         * 写入 Redis
-         */
-        redisTemplate
-                .opsForValue()
-                .set(cacheKey, result);
+    private static String buildReason(
+            int affinity,
+            int hotness,
+            String category,
+            boolean coldStart
+    ) {
 
-        System.out.println(
-                "热门推荐缓存写入"
-        );
+        if (coldStart) {
+            return "热门推荐";
+        }
 
-        return result;
+        if (affinity > 0 && category != null && !category.isBlank()) {
+            return "因为你喜欢「" + category + "」";
+        }
+
+        if (hotness >= 60) {
+            return "近期热门";
+        }
+
+        return "为你发现";
+    }
+
+    private static int nullSafe(Integer value) {
+        return value == null ? 0 : value;
     }
 }
